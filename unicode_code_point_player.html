@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Unicode Code Point Player</title>
+<style>
+:root{--bg:#f3f1ec;--fg:#1d2433;--mut:#6a7080;--card:#fff;--line:#d9d6cd;--acc:#2f4bd8;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12151f;--fg:#eef0f6;--mut:#8b91a5;--card:#1b2030;--line:#2c3348;--acc:#8fa2ff}}
+:root[data-theme="dark"]{--bg:#12151f;--fg:#eef0f6;--mut:#8b91a5;--card:#1b2030;--line:#2c3348;--acc:#8fa2ff}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;justify-content:center}
+main{width:100%;max-width:520px;padding:24px 20px 40px}
+h1{font-size:1.25rem;margin:0 0 4px}
+p.sub{margin:0 0 20px;color:var(--mut);font-size:.9rem}
+.stage{background:var(--card);border:1px solid var(--line);border-radius:14px;height:240px;display:flex;align-items:center;justify-content:center;
+font-size:120px;line-height:1;font-family:"Segoe UI Symbol","Noto Sans Symbols","Noto Sans Symbols 2","Apple Symbols","Segoe UI Emoji","Noto Sans CJK SC",system-ui,sans-serif;user-select:none;overflow:hidden}
+.code{text-align:center;margin-top:10px;font-variant-numeric:tabular-nums;font-size:1.1rem}
+.row{display:flex;gap:12px;margin-top:16px;align-items:end}
+label{display:flex;flex-direction:column;gap:4px;font-size:.85rem;color:var(--mut);flex:1}
+input[type=text],select{font:inherit;font-size:1.1rem;text-align:center;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--fg);width:100%}
+button{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:8px;padding:8px 14px}
+button.play{background:var(--acc);border-color:var(--acc);color:var(--bg);font-weight:600;min-width:96px}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.fps-group{display:flex;gap:0}
+.fps-group select{width:auto;border-top-right-radius:0;border-bottom-right-radius:0;border-right:none;flex:0 0 auto}
+.fps-group input{border-top-left-radius:0;border-bottom-left-radius:0}
+small{color:var(--mut);display:block;margin-top:14px}
+.bad{border-color:#d33!important}
+</style>
+</head>
+<body>
+<main>
+<h1>Unicode Code Point Player</h1>
+<p class="sub">Steps +1 through the code point range, then loops.</p>
+
+<div class="stage" id="stage">☀</div>
+<div class="code" id="code"></div>
+
+<div class="row">
+  <label>Start<input type="text" id="a" value="U+2600" autocomplete="off"></label>
+  <label>End<input type="text" id="b" value="U+26FF" autocomplete="off"></label>
+  <button class="play" id="play">Pause</button>
+</div>
+
+<div class="row">
+  <label>Loop mode
+    <select id="mode"><option value="loop">Loop (A→B, A→B)</option><option value="pp">Ping-pong (A→B→A)</option></select>
+  </label>
+  <label>FPS
+    <div class="fps-group">
+      <select id="fpsSelect">
+        <option value="30">30</option>
+        <option value="60">60</option>
+        <option value="120">120</option>
+        <option value="240">240</option>
+        <option value="custom">Custom</option>
+      </select>
+      <input type="text" id="fps" value="30" inputmode="decimal" autocomplete="off">
+    </div>
+  </label>
+</div>
+
+<div class="row">
+  <button id="prev">◀ −1</button>
+  <button id="next">+1 ▶</button>
+</div>
+
+<div class="row">
+  <label>Font preset
+    <select id="fontPreset">
+      <option value="">System default</option>
+      <option value="fonts/OWLA-Fluent11.woff2">Fluent11</option>
+      <option value="fonts/OWLA-Fluent11-30FPS.woff2">Fluent11 (30FPS)</option>
+      <option value="fonts/OWLA-Metro8.woff2">Metro8</option>
+      <option value="fonts/OWLA-Metro8-30FPS.woff2">Metro8 (30FPS)</option>
+      <option value="fonts/OWLA-Metro8-Infinite.woff2">Metro8 Infinite</option>
+      <option value="fonts/OWLA-Metro8-Infinite-30FPS.woff2">Metro8 Infinite (30FPS)</option>
+    </select>
+  </label>
+  <label>Or upload a font file
+    <input type="file" id="fontFile" accept=".ttf,.otf,.woff,.woff2,font/*">
+  </label>
+  <button id="fontReset" hidden>Reset font</button>
+</div>
+<small id="fontMsg" role="status"></small>
+
+<small>Enter a single character, or a hex code point like U+2600, 0x1F600, 4E00.</small>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const stage=$('stage'), codeEl=$('code'), A=$('a'), B=$('b'), play=$('play'), mode=$('mode'), fpsInput=$('fps'), fpsSelect=$('fpsSelect');
+let i=0, dir=1, timer=null, playing=true, s=0x2600, e=0x26FF, n=256, fps=30;
+
+function toCp(v){
+  v=v.trim(); let m;
+  if((m=v.match(/^(?:u\+|0x)([0-9a-f]{1,6})$/i))) return Math.min(parseInt(m[1],16),0x10FFFF);
+  const ch=Array.from(v);
+  if(ch.length===1) return ch[0].codePointAt(0);
+  if(/^[0-9a-f]{2,6}$/i.test(v)) return Math.min(parseInt(v,16),0x10FFFF);
+  return null;
+}
+function readRange(){
+  const x=toCp(A.value), y=toCp(B.value);
+  A.classList.toggle('bad',x===null); B.classList.toggle('bad',y===null);
+  if(x!==null) s=x; if(y!==null) e=y;
+  n=Math.abs(e-s)+1;
+  i=0; dir=1;
+}
+const cpAt = k => s + (e>=s ? k : -k);
+const hex = c => 'U+' + c.toString(16).toUpperCase().padStart(4,'0');
+function render(){
+  const c=cpAt(i);
+  stage.textContent = (c>=0xD800&&c<=0xDFFF) ? '\uFFFD' : String.fromCodePoint(c);
+  codeEl.textContent = hex(c) + '  ·  ' + (i+1) + ' / ' + n;
+}
+function tick(){
+  if(mode.value==='loop'||n===1){ i=(i+1)%n; }
+  else{
+    if(i>=n-1) dir=-1; else if(i<=0) dir=1;
+    i+=dir;
+  }
+  render();
+}
+function applyFps(v){
+  const f=parseFloat(v);
+  if(!isFinite(f)||f<=0){ fpsInput.classList.add('bad'); return; }
+  fpsInput.classList.remove('bad');
+  fps=Math.min(f,1000);
+  restart();
+}
+function restart(){
+  clearInterval(timer);
+  if(playing) timer=setInterval(tick, 1000/fps);
+}
+play.onclick=()=>{playing=!playing;play.textContent=playing?'Pause':'Play';restart();};
+mode.onchange=()=>{dir=1;};
+fpsSelect.onchange=()=>{
+  if(fpsSelect.value==='custom'){ fpsInput.focus(); fpsInput.select(); return; }
+  fpsInput.value=fpsSelect.value;
+  applyFps(fpsSelect.value);
+};
+fpsInput.oninput=()=>{
+  const match=[...fpsSelect.options].find(o=>o.value===fpsInput.value.trim());
+  fpsSelect.value = match ? match.value : 'custom';
+  applyFps(fpsInput.value);
+};
+A.oninput=B.oninput=()=>{readRange();render();};
+$('prev').onclick=()=>{i=((i-1)%n+n)%n;render();};
+$('next').onclick=()=>{i=(i+1)%n;render();};
+
+const baseFont=getComputedStyle(stage).fontFamily;
+let loadedFace=null;
+const fontMsg=$('fontMsg'), fontReset=$('fontReset'), fontFile=$('fontFile'), fontPreset=$('fontPreset');
+
+async function loadFont(source, label){
+  try{
+    const face = typeof source === 'string'
+      ? new FontFace('CustomGlyph', 'url(' + JSON.stringify(source) + ')')
+      : new FontFace('CustomGlyph', source);
+    await face.load();
+    if(loadedFace) document.fonts.delete(loadedFace);
+    document.fonts.add(face); loadedFace=face;
+    stage.style.fontFamily="'CustomGlyph', "+baseFont;
+    fontReset.hidden=false;
+    fontMsg.textContent='Using '+label+'. Characters missing from it fall back to system fonts.';
+  }catch(err){
+    fontMsg.textContent='Could not load '+label+'. If using a preset, make sure this page is served with a "fonts" folder alongside it.';
+  }
+}
+fontPreset.onchange=()=>{
+  if(!fontPreset.value) return;
+  fontFile.value='';
+  loadFont(fontPreset.value, fontPreset.options[fontPreset.selectedIndex].text);
+};
+fontFile.onchange=async()=>{
+  const f=fontFile.files[0]; if(!f) return;
+  fontPreset.value='';
+  loadFont(await f.arrayBuffer(), f.name);
+};
+fontReset.onclick=()=>{
+  if(loadedFace) document.fonts.delete(loadedFace);
+  loadedFace=null; stage.style.fontFamily=''; fontFile.value=''; fontPreset.value='';
+  fontReset.hidden=true; fontMsg.textContent='';
+};
+
+readRange(); restart(); render();
+</script>
+</body>
+</html>

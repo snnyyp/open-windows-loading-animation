@@ -1,0 +1,6 @@
+Adobe After Effects Auto-Save/
+*.log
+demo/
+*.aep*/
+*SEQUENCE*/
+SFD/
